@@ -1,0 +1,227 @@
+- 👋 Hi, I’m @Jasurbek2009
+- 👀 I’m interested in ...
+- 🌱 I’m currently learning ...
+- 💞️ I’m looking to collaborate on ...
+- 📫 How to reach me ...
+- 😄 Pronouns: ...
+- ⚡ Fun fact: ...
+import logging
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
+import sqlite3
+
+# Bot tokeni
+BOT_TOKEN = "7368165860:AAGWRswFLjN--giGCXzlPIYwq4obeIcdrYw"
+ADMIN_ID = [653625042]  # Bot egasi yoki adminlarning Telegram ID-lari
+CHANNELS = ["@your_channel"]  # Majburiy obuna kanallari
+
+# Logging sozlamalari
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Ma'lumotlar bazasi sozlamalari
+conn = sqlite3.connect('anime_bot.db', check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, phone_number TEXT)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS animes (id INTEGER PRIMARY KEY, name TEXT, description TEXT, episodes INTEGER)''')
+
+# Botning asosiy menyusi
+def main_menu_keyboard(is_admin=False):
+    buttons = [
+        [KeyboardButton("🔄 Qayta yuklash"), KeyboardButton("🔍 Anime qidirish")],
+        [KeyboardButton("📩 Admin va bot egasiga murojaat"), KeyboardButton("📘 Qollanma")],
+        [KeyboardButton("🔥 Eng koʻp koʻrilgan animelar")]
+    ]
+    if is_admin:
+        buttons.append([KeyboardButton("📤 Anime yuklash"), KeyboardButton("👥 Admin tayinlash")])
+        buttons.append([KeyboardButton("🔗 Majburiy obunalar"), KeyboardButton("📊 Statistika")])
+        buttons.append([KeyboardButton("📢 Reklama yuborish")])
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+
+# Start komandasi
+def start(update, context):
+    user_id = update.message.chat.id
+    user = update.message.from_user
+    logger.info(f"Foydalanuvchi {user.username} ({user_id}) botga kirishdi.")
+    
+    # Majburiy obuna tekshiruvi
+    if not check_subscription(update, context):
+        return
+    
+    # Telefon raqamini so'rash
+    if not check_phone_number(user_id):
+        request_phone_number(update, context)
+        return
+    
+    is_admin = user_id in ADMIN_ID
+    update.message.reply_text(
+        f"Xush kelibsiz, {user.username}!",
+        reply_markup=main_menu_keyboard(is_admin)
+    )
+
+# Majburiy obuna tekshiruvi
+def check_subscription(update, context):
+    user_id = update.message.chat.id
+    for channel in CHANNELS:
+        member = context.bot.get_chat_member(channel, user_id)
+        if member.status == 'left':
+            update.message.reply_text(f"Botdan foydalanish uchun {channel} kanaliga obuna bo'ling!")
+            return False
+    return True
+
+# Telefon raqamini tekshirish
+def check_phone_number(user_id):
+    cursor.execute("SELECT phone_number FROM users WHERE id=?", (user_id,))
+    result = cursor.fetchone()
+    return result is not None
+
+# Telefon raqamini so'rash
+def request_phone_number(update, context):
+    keyboard = [[KeyboardButton("📞 Telefon raqamni yuborish", request_contact=True)]]
+    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    update.message.reply_text("Iltimos, botdan foydalanish uchun telefon raqamingizni yuboring:", reply_markup=markup)
+
+# Telefon raqamini qabul qilish
+def handle_contact(update, context):
+    contact = update.message.contact
+    user_id = update.message.chat.id
+    username = update.message.from_user.username
+    phone_number = contact.phone_number
+    
+    # Ma'lumotlarni bazaga yozish
+    cursor.execute("INSERT OR REPLACE INTO users (id, username, phone_number) VALUES (?, ?, ?)", (user_id, username, phone_number))
+    conn.commit()
+    
+    update.message.reply_text("Telefon raqamingiz qabul qilindi!", reply_markup=main_menu_keyboard())
+
+# Admin uchun anime yuklash
+def upload_anime(update, context):
+    user_id = update.message.chat.id
+    if user_id not in ADMIN_ID:
+        update.message.reply_text("Sizda bu funksiyadan foydalanish huquqi yo'q.")
+        return
+    
+    update.message.reply_text("Yangi anime nomini kiriting:")
+    return "ANIME_NAME"
+
+def save_anime_name(update, context):
+    context.user_data['anime_name'] = update.message.text
+    update.message.reply_text("Anime tavsifini kiriting:")
+    return "ANIME_DESCRIPTION"
+
+def save_anime_description(update, context):
+    context.user_data['anime_description'] = update.message.text
+    update.message.reply_text("Anime epizodlar sonini kiriting:")
+    return "ANIME_EPISODES"
+
+def save_anime_episodes(update, context):
+    anime_name = context.user_data['anime_name']
+    anime_description = context.user_data['anime_description']
+    episodes = int(update.message.text)
+    
+    # Ma'lumotlarni bazaga yozish
+    cursor.execute("INSERT INTO animes (name, description, episodes) VALUES (?, ?, ?)", (anime_name, anime_description, episodes))
+    conn.commit()
+    
+    update.message.reply_text(f"Anime \"{anime_name}\" muvaffaqiyatli yuklandi!")
+    return ConversationHandler.END
+
+# Majburiy obunalarni boshqarish
+def manage_subscriptions(update, context):
+    user_id = update.message.chat.id
+    if user_id not in ADMIN_ID:
+        update.message.reply_text("Sizda bu funksiyadan foydalanish huquqi yo'q.")
+        return
+    
+    update.message.reply_text("Hozircha majburiy obunalarni qo'shish funksiyasi tayyor emas.")
+    # Bu yerda kanallar ro'yxatini boshqarish funksiyasini qo'shishingiz mumkin
+    
+# Statistika ko'rish
+def view_statistics(update, context):
+    user_id = update.message.chat.id
+    if user_id not in ADMIN_ID:
+        update.message.reply_text("Sizda bu funksiyadan foydalanish huquqi yo'q.")
+        return
+    
+    cursor.execute("SELECT COUNT(*) FROM users")
+    user_count = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM animes")
+    anime_count = cursor.fetchone()[0]
+    
+    update.message.reply_text(f"Foydalanuvchilar soni: {user_count}\nYuklangan animelar: {anime_count}")
+
+# Reklama yuborish
+def send_announcement(update, context):
+    user_id = update.message.chat.id
+    if user_id not in ADMIN_ID:
+        update.message.reply_text("Sizda bu funksiyadan foydalanish huquqi yo'q.")
+        return
+    
+    update.message.reply_text("Yuboriladigan xabarni kiriting:")
+    return "ANNOUNCEMENT"
+
+def broadcast_message(update, context):
+    message = update.message.text
+    
+    cursor.execute("SELECT id FROM users")
+    users = cursor.fetchall()
+    
+    for user in users:
+        try:
+            context.bot.send_message(user[0], message)
+        except Exception as e:
+            logger.error(f"Xabar yuborishda xatolik: {e}")
+    
+    update.message.reply_text("Xabar barcha foydalanuvchilarga yuborildi!")
+    return ConversationHandler.END
+
+# Botni sozlash
+def main():
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+    
+    # Start komandasi
+    dp.add_handler(CommandHandler("start", start))
+    
+    # Telefon raqamini qabul qilish
+    dp.add_handler(MessageHandler(Filters.contact, handle_contact))
+    
+    # Admin uchun anime yuklash uchun conversation handler
+    anime_handler = ConversationHandler(
+        entry_points=[MessageHandler(Filters.regex('📤 Anime yuklash'), upload_anime)],
+        states={
+            "ANIME_NAME": [MessageHandler(Filters.text, save_anime_name)],
+            "ANIME_DESCRIPTION": [MessageHandler(Filters.text, save_anime_description)],
+            "ANIME_EPISODES": [MessageHandler(Filters.text, save_anime_episodes)]
+        },
+        fallbacks=[]
+    )
+    dp.add_handler(anime_handler)
+    
+    # Reklama yuborish uchun conversation handler
+    announcement_handler = ConversationHandler(
+        entry_points=[MessageHandler(Filters.regex('📢 Reklama yuborish'), send_announcement)],
+        states={
+            "ANNOUNCEMENT": [MessageHandler(Filters.text, broadcast_message)]
+        },
+        fallbacks=[]
+    )
+    dp.add_handler(announcement_handler)
+    
+    # Statistika ko'rish
+    dp.add_handler(MessageHandler(Filters.regex('📊 Statistika'), view_statistics))
+    
+    # Majburiy obunalarni boshqarish
+    dp.add_handler(MessageHandler(Filters.regex('🔗 Majburiy obunalar'), manage_subscriptions))
+    
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
+
+<!---
+Jasurbek2009/Jasurbek2009 is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+You can click the Preview link to take a look at your changes.
+--->
